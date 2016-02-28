@@ -1,0 +1,686 @@
+---
+title: "Final Paper"
+author: "Orsos Mihaly"
+date: "2016. feb. 10."
+output: html_document
+---
+
+Data analysis project bikeshare
+===============================
+
+
+During this paper I will perform a data analysis on bike share in Washington D.C., USA. The data set is related to two-year historical log, corresponding to years 2011 and 2012. The usage of the bike system can be influenced from many factor. For example the weather conditions: I expect in the hotter weather the total rent is going to be higher than is the winter period. The data is hourly frequency. I have 17379 rows and 17 columns. During the analysis I will build a predictive model which is going to predict how many bike is going to be rented in any hour. 
+
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE, warning=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+library(h2o)
+library(pander)
+
+
+```
+
+
+Exploratory Analysis
+--------------------
+
+In this part I will check the predictors (mainly weather conditions) and describe the relationship the total rent and the examined variable. Here I can find evidence to the weather condition has influence to the usage of the total bike rent. 
+
+### Read data, quick look
+
+```{r}
+
+setwd("C:/Users/Mihály/Dropbox/Winter semester/Data Science for Business/my_code/bikeshare")
+d <- read.csv("hour.csv", header = T, sep=",", stringsAsFactors = F)
+dim(d)
+head(d)
+str(d)
+colnames(d)
+summary(d)
+```
+
+
+	- instant: record index
+	- dteday : date
+	- season : season (1:springer, 2:summer, 3:fall, 4:winter)
+	- yr : year (0: 2011, 1:2012)
+	- mnth : month ( 1 to 12)
+	- hr : hour (0 to 23)
+	- holiday : weather day is holiday or not (extracted from http://dchr.dc.gov/page/holiday-schedule)
+	- weekday : day of the week
+	- workingday : if day is neither weekend nor holiday is 1, otherwise is 0.
+	+ weathersit : 
+		- 1: Clear, Few clouds, Partly cloudy, Partly cloudy
+		- 2: Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist
+		- 3: Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds
+		- 4: Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog
+	- temp : Normalized temperature in Celsius. The values are divided to 41 (max)
+	- atemp: Normalized feeling temperature in Celsius. The values are divided to 50 (max)
+	- hum: Normalized humidity. The values are divided to 100 (max)
+	- windspeed: Normalized wind speed. The values are divided to 67 (max)
+	- casual: count of casual users
+	- registered: count of registered users
+	- cnt: count of total rental bikes including both casual and registered
+	
+
+
+### Target variable: cnt
+
+
+The number of the bikes which were used during the listted hour
+
+```{r}
+
+summary(d$cnt)
+
+hist(d$cnt, freq = F, breaks = 80, col = "red", main = "Histogram of total rental bikes", xlab = "Count of total rental bikes", ylab = "% of Total")
+hist(log(d$cnt), freq = F, breaks = 80, col = "red", main = "Histogram of total rental bikes", xlab = "Count of total rental bikes", ylab = "% of Total")
+d[ 1:24,] %>%
+  ggplot(aes(x=instant, y = cnt))+
+  geom_line()+
+  xlab("The first day by hours") +
+  ylab("Count of total rental bikes")
+
+d %>%
+  ggplot(aes(x=instant, y = cnt))+
+  geom_line()+
+  xlab("Two years") +
+  ylab("Count of total rental bikes")
+
+```
+
+###Because of the long right tail I will take log of the target variable. 
+```{r}
+d$cnt <- log(d$cnt)
+```
+
+### Predictor: season
+
+It shows the season (1:springer, 2:summer, 3:fall, 4:winter)
+
+```{r}
+
+d %>%
+  ggplot(aes(x= season, y= cnt)) +
+  geom_point()  +
+  xlab("Season") +
+  ylab("Count of total rental bikes") 
+
+d1<-
+d %>%
+  group_by(season) %>%
+  summarise(Total_rental = sum(cnt))
+d1
+
+d1%>%
+  ggplot(aes(season, Total_rental))+geom_bar(stat = "identity")+
+  xlab("Season")+
+  ylab("Total rental")
+
+
+```
+
+
+### Predictor: mnth 
+
+month (1 to 12)
+
+```{r}
+
+d %>%
+  ggplot(aes(x= mnth, y= cnt)) +
+  scale_x_continuous(breaks = c(1:12))+
+  geom_point()  +
+  xlab("Mounth") +
+  ylab("Count of total rental bikes") 
+
+d2<-
+d %>%
+  group_by(mnth) %>%
+  summarise(Total_rental = sum(cnt))
+d2
+
+d2%>%
+  ggplot(aes(mnth, Total_rental))+geom_bar(stat = "identity")+
+  scale_x_continuous(breaks = c(1:12))+
+  xlab("Mount")+
+  ylab("Total rental")
+
+```
+
+
+
+### Predictor: hr
+
+hour (0 to 12)
+
+```{r}
+d%>%
+  ggplot(aes(x= hr, y= cnt))+
+  scale_x_continuous(breaks= c(0:23))+
+  geom_point()+
+  xlab("Hour")+
+  ylab("Total rental")
+  
+  
+d3 <-  
+d%>%
+  group_by(hr)%>%
+  summarise(Total_rental= sum(cnt))
+d3
+
+d3%>%
+  ggplot(aes(x=hr, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_continuous(breaks=c(0:23))+
+  xlab("Hour")+
+  ylab("Total rental")
+
+```
+
+
+### Predictor: holiday
+
+weather day is holiday or not (extracted from http://dchr.dc.gov/page/holiday-schedule)
+
+```{r}
+summary(as.factor(d$holiday))
+
+d %>%
+  ggplot(aes(x=instant, y= cnt))+ geom_point()+ facet_grid(holiday ~.)+ 
+  xlab("Two years")  +
+  ylab("Total rental")
+
+d4<-
+d%>%
+  group_by(holiday)%>%
+  summarise(Total_rental= sum(cnt))
+d4
+
+d4 %>%
+  ggplot(aes(x= holiday, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_discrete(breaks=c(0,1))
+
+```
+
+
+
+### Predictor: weekday
+day of the week (0 to 6, Sunday:0, Monday:1, etc)
+
+```{r}
+d%>%
+  ggplot(aes(x= weekday, y= cnt))+
+  scale_x_continuous(breaks= c(0:6))+
+  geom_point()+
+  xlab("Day of the week")+
+  ylab("Total rental")
+  
+  
+d5 <-  
+d%>%
+  group_by(weekday)%>%
+  summarise(Total_rental= sum(cnt))
+d5
+
+d5%>%
+  ggplot(aes(x=weekday, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_continuous(breaks=c(0:6))+
+  xlab("Day of the week")+
+  ylab("Total rental")
+```
+
+
+
+
+### Predictor: workingday 
+
+If day is neither weekend nor holiday is 1, otherwise is 0.
+
+```{r}
+summary(as.factor(d$workingday))
+
+d %>%
+  ggplot(aes(x=instant, y= cnt))+ geom_point()+ facet_grid(workingday ~.)+ 
+  xlab("Two years")  +
+  ylab("Total rental")
+
+d6<-
+d%>%
+  group_by(workingday)%>%
+  summarise(Total_rental= sum(cnt))
+d6
+
+d6 %>%
+  ggplot(aes(x= workingday, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_discrete(breaks=c(0,1))
+
+```
+
+
+
+### Predictor: weathersit
+
+1. Clear, Few clouds, Partly cloudy, Partly cloudy
+2. Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist
+3. Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds
+4. Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog
+
+```{r}
+summary(as.factor(d$weathersit))
+
+d%>%
+  ggplot(aes(x= weathersit, y= cnt))+
+  scale_x_continuous(breaks= c(0:4))+
+  geom_point()+
+  xlab("Day of the week")+
+  ylab("Total rental")
+  
+d7 <-  
+d%>%
+  group_by(weathersit)%>%
+  summarise(Total_rental= sum(cnt))
+d7
+
+d7%>%
+  ggplot(aes(x=weathersit, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_continuous(breaks=c(0:6))+
+  xlab("Day of the week")+
+  ylab("Total rental")
+```
+
+
+### Predictor: temp
+
+Normalized temperature in Celsius. The values are divided to 41 (max)
+
+```{r}
+
+temp_Stats <-  c(Mean = mean(d$temp), 
+                 Std. = sd(d$temp), 
+                 Min. = min(d$temp),
+                 Median = median(d$temp),
+                 Max. = max(d$temp),
+                 Num. = length(d$temp)
+)
+print(temp_Stats)
+d%>%
+ggplot(aes(x=temp, y= cnt))+
+  geom_point()+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1) ))+
+  xlab("Normalized temperature")+
+  ylab("Total rental")
+
+d8 <-
+d%>% 
+  group_by(temp)%>%
+  summarise(Total_rental= sum(cnt))
+d8
+
+d8%>%
+  ggplot(aes(x=temp, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1)))+
+  xlab("Normalized temperature")+
+  ylab("Total rental")
+```
+
+
+### Predictor: atemp
+
+Normalized feeling temperature in Celsius. The values are divided to 50 (max)
+
+```{r}
+
+atemp_Stats <-  c(Mean = mean(d$atemp), 
+                 Std. = sd(d$atemp), 
+                 Min. = min(d$atemp),
+                 Median = median(d$atemp),
+                 Max. = max(d$atemp),
+                 Num. = length(d$atemp)
+)
+print(atemp_Stats)
+d%>%
+ggplot(aes(x=atemp, y= cnt))+
+  geom_point()+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1) ))+
+  xlab("Feeling temperature")+
+  ylab("Total rental")
+
+d9 <-
+d%>% 
+  group_by(atemp)%>%
+  summarise(Total_rental= sum(cnt))
+d9
+
+d9%>%
+  ggplot(aes(x=atemp, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1)))+
+  xlab("Feeling temperature")+
+  ylab("Total rental")
+```
+
+
+
+### Predictor: humidity
+
+Normalized humidity. The values are divided to 100 (max)
+
+```{r}
+
+hum_Stats <-  c(Mean = mean(d$hum), 
+                 Std. = sd(d$hum), 
+                 Min. = min(d$hum),
+                 Median = median(d$hum),
+                 Max. = max(d$hum),
+                 Num. = length(d$hum)
+)
+print(hum_Stats)
+d%>%
+ggplot(aes(x=hum, y= cnt))+
+  geom_point()+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1) ))+
+  xlab("Normalized humidity")+
+  ylab("Total rental")
+
+d10 <-
+d%>% 
+  group_by(hum)%>%
+  summarise(Total_rental= sum(cnt))
+d10
+
+d10%>%
+  ggplot(aes(x=hum, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1)))+
+  xlab("Normalized humidity")+
+  ylab("Total rental")
+
+```
+
+### Predictor: windspeed
+
+Normalized wind speed. The values are divided to 67 (max)
+
+```{r}
+
+wind_Stats <-  c(Mean = mean(d$windspeed), 
+                 Std. = sd(d$windspeed), 
+                 Min. = min(d$windspeed),
+                 Median = median(d$windspeed),
+                 Max. = max(d$windspeed),
+                 Num. = length(d$windspeed)
+)
+print(wind_Stats)
+d%>%
+ggplot(aes(x=windspeed, y= cnt))+
+  geom_point()+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1) ))+
+  xlab("Normalized windspeed")+
+  ylab("Total rental")
+
+d11 <-
+d%>% 
+  group_by(windspeed)%>%
+  summarise(Total_rental= sum(cnt))
+d11
+
+d11%>%
+  ggplot(aes(x=windspeed, y= Total_rental))+
+  geom_bar(stat = "identity")+
+  scale_x_continuous(breaks=c(seq(from =0, to = 1,by = 0.1)))+
+  xlab("Normalized windspeed")+
+  ylab("Total rental")
+
+
+```
+
+### Count of casual users
+
+```{r}
+
+casual_Stats <-  c(Mean = mean(d$casual), 
+                 Std. = sd(d$casual), 
+                 Min. = min(d$casual),
+                 Median = median(d$casual),
+                 Max. = max(d$casual),
+                 Num. = length(d$casual)
+)
+print(casual_Stats)
+hist(d$casual, freq = F, breaks = 80, col = "red", main = "Histogram of casual users", xlab = "Count of casual users", ylab = "% of Total")
+
+
+```
+
+### Count of registered users
+
+```{r}
+
+registered_Stats <-  c(Mean = mean(d$registered), 
+                 Std. = sd(d$registered), 
+                 Min. = min(d$registered),
+                 Median = median(d$registered),
+                 Max. = max(d$registered),
+                 Num. = length(d$registered)
+)
+print(registered_Stats)
+hist(d$registered, freq = F, breaks = 80, col = "red", main = "Histogram of registered users", xlab = "Count of registered users", ylab = "% of Total")
+
+
+```
+
+
+
+### Split train/test (could do CV etc.)
+
+```{r}
+final_data <- 
+d %>%
+select(season, hr, holiday, weekday, workingday, temp, weathersit, atemp, hum, windspeed, cnt)
+
+set.seed(123)
+N <- nrow(final_data)
+idx_train <- sample(1:N,N/2)
+idx_valid <- sample(base::setdiff(1:N, idx_train), N/4)
+idx_test <- base::setdiff(base::setdiff(1:N, idx_train),idx_valid)
+d_train <- final_data[idx_train,]
+d_valid <- final_data[idx_valid,]
+d_test  <- final_data[idx_test,]
+
+```
+
+Summary of explanatory part
+---------------------------
+
+As I expected the weather condition is influencing a lot the bike usage, we can see from the graph, in the summer the bike renting is higher than in winter. We can also realize an interesting fact the total renting is quite high between 8-9 am and 5-6 pm this is the time when people are going to work and after going home.  When the weather was windy or rainy people used less the bike system. 
+
+
+
+
+
+Modelling 
+----------
+
+I will perform several machine learning algorithm to predict how many bike usage are expected. Then I will compare its performance. To measure the accuracy of the model I will calculate the mean squared error.
+
+
+A random forest model  with 200 tress in Rstudio
+I created a randomforest model, which is build up from 200 decision tree with boosting. My aim with this model was to compare the result visually. I wanted to see how my model is working. Therefore I created a table with 100 observations. You can see the “cnt” column contains the actual log value and the “pred” is contains the predicted log value. After the table you can see a graph which shows the predicting power of the variables, you can see the most powerful is the hr variable and the second is the temperature. 
+```{r}
+md <- randomForest(cnt ~ ., data = d_train, ntree = 200)
+md
+plot(md)
+phat <- predict(md, d_test)
+f1 <- as.data.frame( d_test$cnt)
+f2 <- as.data.frame(phat)
+f <- cbind(f1, f2)
+names(f) <- c("cnt", "pred")
+head(f, 100)
+md <- randomForest(cnt ~ ., data = d_train, ntree = 200, importance = TRUE)
+varImpPlot(md, type = 2)
+
+```
+
+
+
+### Modelling with H2O 
+This framework help to analyze this amount of data faster and better. During the H2O work the user is able to connect to a graphical interface to perform machine learning models and check the results.
+
+
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+h2o.init(max_mem_size = "4g", nthreads = -1)   
+dx_train <- as.h2o(d_train)  
+dx_valid <- as.h2o(d_valid)
+dx_test <- as.h2o(d_test)
+
+```
+
+
+### Random forest
+Random forest with 500 trees, max dept=20. 
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+
+rf_md <- h2o.randomForest(x = 1:10, y = 11, 
+            training_frame = dx_train, 
+            mtries = -1, ntrees = 500, max_depth = 20, nbins = 200)
+```
+
+```{r}
+rf_md
+rf_perf <- h2o.performance(rf_md, dx_test)
+rf_perf
+```
+
+
+### GBM
+GBM model with 500 trees, max dept = 15, learn rate= 0.01
+
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+gbm_md <- h2o.gbm(x = 1:10, y = 11, 
+        training_frame = dx_train, validation_frame = dx_valid,
+        max_depth = 15, ntrees = 500, learn_rate = 0.01, nbins = 200,
+        stopping_rounds = 3, stopping_tolerance = 1e-3)
+```
+
+```{r}
+
+gbm_md
+gbm_perf <- h2o.performance(gbm_md, dx_test)
+gbm_perf
+```
+
+
+### GBM with cross validation
+GBM model with 5 fold cross validation, 500 trees, max dept = 15, learn rate= 0.01
+
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+
+gbm_cv_md <- h2o.gbm(x = 1:10, y = 11, 
+          training_frame = dx_train, 
+          max_depth = 15, ntrees = 500, learn_rate = 0.01, nbins = 200,
+          nfolds = 5,
+          stopping_rounds = 3, stopping_tolerance = 1e-3)
+```
+
+```{r}
+
+gbm_cv_md
+gbm_cv_perf <-h2o.performance(gbm_cv_md, dx_test)
+gbm_cv_perf
+```
+
+### GBM with grid search
+GBM model with grid search 500 trees, max dept = (5, 10, 20),  learn rate= (0.01, 0.1)
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+gmb_gs_md <- h2o.grid("gbm", x = 1:10, y = 11, 
+            training_frame = dx_train, validation_frame = dx_valid,
+            hyper_params = list(ntrees = 500,
+                                max_depth = c(5,10,20),
+                                learn_rate = c(0.01,0.1),
+                                nbins = 200),
+            stopping_rounds = 5, stopping_tolerance = 1e-3)
+```
+
+```{r}            
+gmb_gs_md
+result <-
+do.call(rbind, lapply(gmb_gs_md@model_ids, function(m_id) {
+  mm <- h2o.getModel(m_id)
+  hyper_params <- mm@allparameters
+  data.frame(m_id = m_id, 
+             mse = h2o.performance(mm, dx_test)@metrics$MSE,
+             max_depth = hyper_params$max_depth,
+             learn_rate = hyper_params$learn_rate )
+})) %>% arrange(mse)
+result_gmb_gs_md<- result[,-1 ]
+
+```
+
+### Neural network
+
+Neural network model with 200 hidden layer and Recifier activation. 
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+
+
+NN_md <- h2o.deeplearning(x = 1:10, y = 11, 
+          training_frame = dx_train, validation_frame = dx_valid,
+          activation = "Rectifier", hidden = c(200,200), epochs = 100,
+          stopping_rounds = 3, stopping_tolerance = 0)
+```
+
+```{r} 
+NN_md
+NN_perf <-h2o.performance(NN_md, dx_test)
+NN_perf
+```
+
+
+### Neural network with regularization (L1, L2, dropout)
+
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+NN_wr_md <- h2o.deeplearning(x = 1:10, y = 11, 
+          training_frame = dx_train, validation_frame = dx_valid,
+          activation = "RectifierWithDropout", hidden = c(200,200), epochs = 100,
+          input_dropout_ratio = 0.2, hidden_dropout_ratios = c(0.2,0.2),
+          l1 = 1e-4, l2 = 1e-4,
+          stopping_rounds = 3, stopping_tolerance = 0)
+```
+
+```{r} 
+
+NN_wr_md
+NN_wr_perf <-h2o.performance(NN_wr_md, dx_test)
+NN_wr_perf
+```
+
+
+##Results
+```{r echo=FALSE, message=FALSE, include=FALSE, cache=FALSE}
+resulttable <- data.frame(Model = c("Randomforest training", "Randomforest test", "GBM training", "GBM test", "GBM with cross validation training","GBM with cross validation test", "Neural network training", "Neural network test", "Neural network with regularization training", "Neural network with regularization test" ),
+  MSE= c(h2o.mse(rf_md),h2o.mse(rf_perf),h2o.mse(gbm_md),h2o.mse(gbm_perf),h2o.mse(gbm_cv_md),h2o.mse(gbm_cv_perf),h2o.mse(NN_md),h2o.mse(NN_perf),h2o.mse(NN_wr_md),h2o.mse(NN_wr_perf)) , 
+  Time= c(rf_md@model$run_time,"Not measured", gbm_md@model$run_time,"Not measured",gbm_cv_md@model$run_time,"Not measured",NN_md@model$run_time,"Not measured",NN_wr_md@model$run_time,"Not measured" ))
+
+```
+The table below shows the performance of the different machine learning algorithm, that I performeg during the work. 
+As we can see the GBM model is most probably over fitted, the result in the training set is a lot better than in the test set.  The Neural Network model performed very well in this task.  I would use this in production.
+
+
+```{r} 
+resulttable
+```
+
+
+The table below show the result of the GBM model with grid search. With the help of the grid  search we are able to run models with different parameters. After we got a result we can see where the best is and we can make another grid search around the best parameters.   
+We can see as the max dep decreasing the model will perform better, but it will be over fitted. 
+```{r}
+pander(result_gmb_gs_md)
+
+```
+
